@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Board Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .log {
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .board {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-gap: 5px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            max-width: 300px;
+            flex-shrink: 0;
+        }
+        .tile {
+            width: 50px;
+            height: 50px;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background-color: #f0f0f0;
+        }
+        .tile.blue { background-color: #87CEEB; }
+        .tile.red { background-color: #FF6347; }
+        .tile.yellow { background-color: #FFFF00; }
+        .tile.green { background-color: #32CD32; }
+        .tile.white { background-color: #FFFFFF; }
+        .tile.player {
+            font-size: 10px;
+            color: black;
+            font-weight: bold;
+        }
+        .player-stats {
+            min-width: 200px; /* Ensures stats take up space */
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+        }
+        .game-container {
+            display: flex;
+            align-items: flex-start; /* Aligns top of both elements */
+            gap: 20px; /* Adds space between board and stats */
+        }
+    </style>
+</head>
+<body>
+
+<h1>Interactive Board Game</h1>
+<p>Click "Start Game" to begin the game.</p>
+<button id="startBtn">Start/Restart</button>
+
+
+
+
+
+<div class="log" id="log"></div>
+<button id="actionBtn" disabled>Play Action Card</button>
+<button id="skipBtn" disabled>Skip Turn</button>
+<button id="nextRoundBtn" style="display: none;">Start Next Round</button>
+<div class="game-container">
+    <div class="board" id="board"></div>
+    <div class="player-stats" id="playerStats"></div>
+</div>
+
+
+<script>
+/******************************
+ * 🔹 GAME INITIALIZATION
+ * - Define players, tiles, event cards, and action cards.
+ * - Set up initial game state.
+ ******************************/
+ const boardSize = 20;
+    let round = 1;
+    let turn = 1;
+    let interval;
+    let gameDirection = 1;
+
+    const stats = {
+    blueTile: 0,
+    redTile: 0,
+    yellowTile: 0,
+    greenTile: 0,
+    flagTile: 0,
+    flagsLanded: 0
+
+};
+
+
+const players = [
+    { name: "You", position: 0, coins: 10, actionCards: [], blocked: false, flags: 5, color: "#003366" }, // Dark Blue
+    { name: "CPU 1", position: 0, coins: 10, actionCards: [], blocked: false, flags: 5, color: "#8B8000" }, // Dark Red
+    { name: "CPU 2", position: 0, coins: 10, actionCards: [], blocked: false, flags: 5, color: "#FF8C00" }, // Dark Orange
+    { name: "CPU 3", position: 0, coins: 10, actionCards: [], blocked: false, flags: 5, color: "#800080" }  // Purple
+];
+
+
+
+    const tiles = [
+        // "green","green","green","green","green",
+        // "green","green","green","green","green",
+        // "green","green","green","green","green",
+        // "green","green","green","green","green",
+       "yellow","blue","red","blue","red",
+       "green","blue","red","blue","red",
+       "yellow","blue","red","blue","red",
+       "green","blue","red","blue","red",
+    ];
+    
+    const tileData = tiles.map(tile => ({
+    type: tile,        // Existing tile color
+    flagOwner: null    // No owner initially
+}));
+
+    const eventCards = [
+        "Charity",
+        "Toll",
+        "Land Tax",
+        "Flag Reduction",
+        "Reverse"
+    ];
+    
+    const actionCards = [
+        "Steal 1 coin from another player.",
+        "Move an extra space.",
+        "Block another player's move.",
+        "Swap positions with another player.",
+        "Steal a flagged tile for this round."
+    ];
+
+
+/******************************
+ * 🔹 UTILITY FUNCTIONS
+ * - Dice roll function.
+ * - Card drawing function.
+ * - Logging function.
+ * - UI update functions.
+ ******************************/
+ function rollDie() {
+        return Math.floor(Math.random() * 6) + 1;
+    }
+
+    function drawCard(type) {
+        return type === "event"
+            ? eventCards[Math.floor(Math.random() * eventCards.length)]
+            : actionCards[Math.floor(Math.random() * actionCards.length)];
+    }
+
+    function log(message) {
+    const logDiv = document.getElementById('log');
+    const newEntry = document.createElement('div');
+
+    // 🔹 Highlight "It's your turn!" and turn options in red
+    if (message.includes("It's your turn!") || message.includes("Click 'Play Action Card' or 'Skip Turn' to continue.") || message.includes("Start Next Round")) {
+        newEntry.style.color = "red";
+        newEntry.style.fontSize = "18px";
+        newEntry.style.fontWeight = "bold";
+    }
+
+    // 🔹 Replace player names with colored versions
+    players.forEach(player => {
+        if (message.includes(player.name)) {
+            let nameSpan = `<span style="color:${player.color}; font-weight:bold;">${player.name}</span>`;
+            message = message.replace(player.name, nameSpan);
+        }
+    });
+
+    newEntry.innerHTML = message; // ✅ Use innerHTML to apply color formatting
+    logDiv.appendChild(newEntry);
+    logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll log
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); // Auto-scroll page
+}
+
+
+
+function updateBoard() {
+    const boardDiv = document.getElementById('board');
+    boardDiv.innerHTML = '';
+
+    tileData.forEach((tile, index) => {
+        const tileDiv = document.createElement('div');
+        tileDiv.classList.add('tile', tile.type);
+
+        if (tile.flagOwner !== null) {
+            let flagColor = tile.flagOwner.color; // Get player's assigned color
+            tileDiv.style.border = `3px solid ${flagColor}`; // Color the flag border
+            tileDiv.title = `Flagged by ${tile.flagOwner.name}`;
+        }
+
+        players.forEach(player => {
+            if (player.position === index) {
+                const playerDiv = document.createElement('div');
+                playerDiv.classList.add('player');
+                playerDiv.style.color = player.color; // Apply player name color
+                playerDiv.textContent = player.name;
+                tileDiv.appendChild(playerDiv);
+            }
+        });
+
+        boardDiv.appendChild(tileDiv);
+    });
+}
+
+
+
+function updatePlayerStats() {
+    const playerStatsDiv = document.getElementById('playerStats');
+    playerStatsDiv.innerHTML = players.map(player => 
+        `<div style="color: ${player.color}; font-weight: bold;">
+            ${player.name}: <span style="color: black;">${player.coins} coins, ${player.actionCards.length} actions, ${player.flags} flags</span>
+        </div>`
+    ).join('');
+
+    playerStatsDiv.innerHTML += `
+        <h3>Tile Stats</h3>
+        <p>Blue Tiles Landed On: ${stats.blueTile}</p>
+        <p>Red Tiles Landed On: ${stats.redTile}</p>
+        <p>Yellow Tiles Landed On: ${stats.yellowTile}</p>
+        <p>Green Tiles Landed On: ${stats.greenTile}</p>
+        <p>Total Flagged Tiles: ${stats.flagTile}</p>
+        <p>Total Flagged Tiles landed on: ${stats.flagsLanded}</p>
+        <p>Game Direction: ${gameDirection === 1 ? "Forward" : "Reverse"}</p>
+    `;
+}
+
+
+
+function canFlagTile(player, tileIndex) {
+    let flagCost = round; // Flag cost increases with the round
+    return (tileData[tileIndex].type === "red" || tileData[tileIndex].type === "blue") 
+        && tileData[tileIndex].flagOwner === null 
+        && player.flags > 0 
+        && player.coins >= flagCost;
+}
+
+
+function flagTile(player, tileIndex) {
+    let flagCost = round; // Cost is based on the round
+    player.coins -= flagCost;
+    player.flags -= 1;
+    stats.flagTile++;
+    
+    tileData[tileIndex].flagOwner = player;
+    tileData[tileIndex].flagPrice = flagCost + 1; // Store flag cost + 1 for penalty
+
+    log(`${player.name} flagged tile ${tileIndex} for ${flagCost} coins. Anyone who lands here will pay ${flagCost + 1} coins.`);
+    
+    updateBoard();
+    updatePlayerStats();
+}
+
+
+
+/******************************
+ * 🔹 ACTION CARD FUNCTIONS
+ * - Playing action cards.
+ * - Stealing coins, swapping positions, etc.
+ ******************************/
+ function playActionCard() {
+    let player = players[0]; // "You" are always the first player in the array
+
+    if (player.actionCards.length === 0) {
+        log("You have no action cards to play!");
+        return;
+    }
+
+    let actionCardsCopy = [...player.actionCards]; // Copy of action cards to iterate through
+
+    while (actionCardsCopy.length > 0) {
+        // Display available action cards with numbers
+        let cardList = actionCardsCopy.map((card, index) => `${index + 1}: ${card}`).join("\n");
+
+        let choice = prompt(`Choose a card to play:\n${cardList}\nEnter the number of the card (or press Cancel to stop):`);
+
+        if (choice === null) {
+            log("You ended your action phase.");
+            return; // **Exit the function entirely when Cancel is pressed**
+        }
+
+        choice = parseInt(choice);
+        if (isNaN(choice) || choice < 1 || choice > actionCardsCopy.length) {
+            log("Invalid choice. Please enter a valid number.");
+            continue; // If invalid input, re-prompt
+        }
+
+        // Get the selected card and remove it from both lists
+        let selectedCard = actionCardsCopy.splice(choice - 1, 1)[0];
+        player.actionCards = player.actionCards.filter(card => card !== selectedCard); // Update original list
+        log(`You played: ${selectedCard}`);
+
+        // Apply effects based on the card played
+        if (selectedCard === "Move an extra space.") {
+            log("You move forward 1 extra space!");
+            moveExtraPosition(player);
+        } else if (selectedCard === "Steal 1 coin from another player.") {
+            stealCoin(player);
+        } else if (selectedCard === "Block another player's move.") {
+            blockTurn(player);
+        } else if (selectedCard === "Swap positions with another player.") {
+            swapPositions(player);
+        } else if (selectedCard === "Steal a flagged tile for this round.") {
+            stealFlaggedTile(player);
+}
+
+    }
+
+    log("You have no more action cards.");
+}
+
+function blockTurn(player) {
+    // List CPU players to block
+    let opponentList = players
+        .slice(1) // Exclude the player
+        .map((opponent, index) => `${index + 1}: ${opponent.name}`)
+        .join("\n");
+
+    let choice = prompt(`Choose a player to block from moving next turn:\n${opponentList}\nEnter the number of the opponent:`);
+
+    if (choice === null) {
+        log("You decided not to block anyone.");
+        return; // Exit if the player cancels
+    }
+
+    choice = parseInt(choice);
+    let targetIndex = choice - 1;
+
+    if (isNaN(choice) || targetIndex < 0 || targetIndex >= players.length - 1) {
+        log("Invalid choice. No player was blocked.");
+        return; // Invalid input, turn continues without blocking
+    }
+
+    let target = players[targetIndex + 1]; // Adjust index since we excluded the player
+    target.blocked = true;
+    log(`${player.name} blocked ${target.name}'s next move!`);
+}
+
+function swapPositions(player) {
+    // List CPU players to swap with
+    let opponentList = players
+        .slice(1) // Exclude the player
+        .map((opponent, index) => `${index + 1}: ${opponent.name} (Position: ${opponent.position})`)
+        .join("\n");
+
+    let choice = prompt(`Choose a player to swap positions with:\n${opponentList}\nEnter the number of the opponent:`);
+
+    if (choice === null) {
+        log("You decided not to swap positions.");
+        return; // Exit if the player cancels
+    }
+
+    choice = parseInt(choice);
+    let targetIndex = choice - 1;
+
+    if (isNaN(choice) || targetIndex < 0 || targetIndex >= players.length - 1) {
+        log("Invalid choice. No swap occurred.");
+        return; // Invalid input, turn continues without swapping
+    }
+
+    let target = players[targetIndex + 1]; // Adjust index since we excluded the player
+
+    // Swap positions
+    let tempPosition = player.position;
+    player.position = target.position;
+    target.position = tempPosition;
+
+    log(`${player.name} swapped positions with ${target.name}!`);
+
+    updateBoard();
+}
+
+function moveExtraPosition(player) {
+    player.position = (player.position + gameDirection + tiles.length) % tiles.length; // Move 1 space forward
+    log(`${player.name} moved an extra space!`);
+
+    // Apply tile effects for the new position
+    let tileEffect = tiles[player.position];
+
+    if (tileEffect === "blue") {
+        player.coins += 1;
+        stats.blueTile++;
+        log(`${player.name} landed on a blue tile and gained 1 coin.`);
+    } else if (tileEffect === "red") {
+        player.coins -= 1;
+        stats.redTile++;
+        log(`${player.name} landed on a red tile and lost 1 coin.`);
+    } else if (tileEffect === "yellow") {
+        stats.yellowTile++;
+        let card = drawCard("action");
+        player.actionCards.push(card);
+        log(`${player.name} drew an action card: ${card}`);
+    } else if (tileEffect === "green") {
+        stats.greenTile++;
+        let card = drawCard("event");
+        log(`${player.name} drew an event card: ${card}`);
+        handleEventCard(players, player, card);
+    }
+
+    updateBoard();
+    updatePlayerStats();
+}
+
+function stealCoin(player) {
+    // List opponents (CPU players only)
+    let opponentList = players
+        .slice(1) // Exclude the player
+        .map((opponent, index) => `${index + 1}: ${opponent.name} (${opponent.coins} coins)`)
+        .join("\n");
+
+    let choice = prompt(`Choose a player to steal from:\n${opponentList}\nEnter the number of the opponent:`);
+
+    if (choice === null) {
+        log("You decided not to steal.");
+        return; // Exit if the player cancels
+    }
+
+    choice = parseInt(choice);
+    let targetIndex = choice - 1;
+
+    if (isNaN(choice) || targetIndex < 0 || targetIndex >= players.length - 1) {
+        log("Invalid choice. No coins were stolen.");
+        return; // Invalid input, turn continues without stealing
+    }
+
+    let target = players[targetIndex + 1]; // Adjust index since we excluded the player
+
+    if (target.coins > 0) {
+        target.coins -= 1;
+        player.coins += 1;
+        log(`${player.name} stole 1 coin from ${target.name}!`);
+    } else {
+        log(`${target.name} has no coins to steal.`);
+    }
+
+    updatePlayerStats();
+}
+
+function stealFlaggedTile(player) {
+    // Find opponents who own flagged tiles
+    let opponentsWithFlags = players.filter(opponent => opponent !== player &&
+        tileData.some(tile => tile.flagOwner === opponent));
+
+    if (opponentsWithFlags.length === 0) {
+        log(`${player.name} tried to steal a flagged tile, but no opponents have any.`);
+        return;
+    }
+
+    // Let player choose an opponent to steal from
+    let opponentNames = opponentsWithFlags.map((opponent, index) => `${index + 1}: ${opponent.name}`).join("\n");
+    let choice = prompt(`Choose a player to steal a flagged tile from:\n${opponentNames}`);
+
+    if (choice === null) {
+        log(`${player.name} decided not to steal a flagged tile.`);
+        return;
+    }
+
+    let chosenIndex = parseInt(choice) - 1;
+    if (isNaN(chosenIndex) || chosenIndex < 0 || chosenIndex >= opponentsWithFlags.length) {
+        log(`Invalid choice. No flagged tile was stolen.`);
+        return;
+    }
+
+    let targetPlayer = opponentsWithFlags[chosenIndex];
+
+    // Find a flagged tile owned by the target
+    let targetTileIndex = tileData.findIndex(tile => tile.flagOwner === targetPlayer);
+
+    if (targetTileIndex !== -1) {
+        tileData[targetTileIndex].originalOwner = targetPlayer; // Store original owner
+        tileData[targetTileIndex].flagOwner = player; // Temporarily transfer ownership
+
+        log(`${player.name} stole a flagged tile from ${targetPlayer.name} for this round!`);
+        updateBoard();
+        updatePlayerStats();
+    }
+}
+
+
+
+/******************************
+ * 🔹 CPU ACTION LOGIC
+ * - CPU decision-making for action cards.
+ * - Smart targeting for stealing/blocking.
+ ******************************/
+ function cpuPlayActionCard(player) {
+    if (player.actionCards.length === 0) return; // No action cards to play
+
+    // 50% chance the CPU will play an action card
+    if (Math.random() < 0.5) {
+        log(`${player.name} decided not to use an action card.`);
+        return;
+    }
+
+    // Select a random action card
+    let randomIndex = Math.floor(Math.random() * player.actionCards.length);
+    let selectedCard = player.actionCards.splice(randomIndex, 1)[0]; // Remove from hand
+
+    log(`${player.name} played: ${selectedCard}`);
+
+    // Apply effects based on the card played
+    if (selectedCard === "Move an extra space.") {
+        log(`${player.name} moves forward 1 extra space!`);
+        moveExtraPosition(player);
+    } else if (selectedCard === "Steal 1 coin from another player.") {
+        cpuStealFromRichest(player);
+    } else if (selectedCard === "Block another player's move.") {
+        cpuBlockRichest(player);
+    } else if (selectedCard === "Swap positions with another player.") {
+        cpuSwapRandom(player);
+    } else if (selectedCard === "Steal a flagged tile for this round.") {
+    cpuStealFlaggedTile(player);
+    }
+
+}
+
+function cpuStealFromRichest(player) {
+    let richest = players
+        .filter(p => p !== player) // Exclude the CPU itself
+        .reduce((max, p) => (p.coins > max.coins ? p : max), players[1]); // Start with first CPU opponent
+
+    if (richest.coins > 0) {
+        richest.coins -= 1;
+        player.coins += 1;
+        log(`${player.name} stole 1 coin from ${richest.name} (Richest).`);
+    } else {
+        log(`${player.name} tried to steal but ${richest.name} had no coins.`);
+    }
+
+    updatePlayerStats();
+}
+
+function cpuBlockRichest(player) {
+    let richest = players
+        .filter(p => p !== player) // Exclude the CPU itself
+        .reduce((max, p) => (p.coins > max.coins ? p : max), players[1]); // Start with first CPU opponent
+
+    richest.blocked = true;
+    log(`${player.name} blocked ${richest.name} from moving next turn (Richest).`);
+}
+
+function cpuSwapRandom(player) {
+    let opponents = players.filter(p => p !== player); // Exclude the CPU itself
+    let target = opponents[Math.floor(Math.random() * opponents.length)]; // Randomly pick an opponent
+
+    // Swap positions
+    let tempPosition = player.position;
+    player.position = target.position;
+    target.position = tempPosition;
+
+    log(`${player.name} swapped positions with ${target.name} (Random).`);
+
+    updateBoard();
+}
+
+function cpuStealFlaggedTile(player) {
+    // Find opponents who own flagged tiles
+    let opponentsWithFlags = players.filter(opponent => opponent !== player &&
+        tileData.some(tile => tile.flagOwner === opponent));
+
+    if (opponentsWithFlags.length === 0) {
+        log(`${player.name} tried to steal a flagged tile, but no opponents have any.`);
+        return;
+    }
+
+    // Pick a random opponent with a flagged tile
+    let targetPlayer = opponentsWithFlags[Math.floor(Math.random() * opponentsWithFlags.length)];
+
+    // Find a flagged tile owned by the target
+    let targetTileIndex = tileData.findIndex(tile => tile.flagOwner === targetPlayer);
+
+    if (targetTileIndex !== -1) {
+        tileData[targetTileIndex].originalOwner = targetPlayer; // Store original owner
+        tileData[targetTileIndex].flagOwner = player; // Temporarily transfer ownership
+
+        log(`${player.name} stole a flagged tile from ${targetPlayer.name} for this round!`);
+        updateBoard();
+        updatePlayerStats();
+    }
+}
+
+
+/******************************
+ * 🔹 EVENT CARD FUNCTIONS
+ * - Charity event.
+ * - Toll event.
+ ******************************/
+ function handleEventCard(players, player, card) {
+    if (card === "Charity") {
+        let richest = players.reduce((max, p) => (p.coins > max.coins ? p : max), players[0]);
+        let poorest = players.reduce((min, p) => (p.coins < min.coins ? p : min), players[0]);
+
+        if (richest !== poorest && richest.coins >= 2) {
+            richest.coins -= 2;
+            poorest.coins += 2;
+            log(`${richest.name} gave 2 coins to ${poorest.name} as charity.`);
+        } else {
+            log("No charity was given since there is no clear richest or poorest player.");
+        }
+    } 
+    else if (card === "Toll") {
+        players.forEach(p => {
+            if (p !== player && p.coins > 0) {
+                p.coins -= 1;
+                player.coins += 1;
+            }
+        });
+        log(`Each player paid 1 coin to ${player.name} as the toll collector.`);
+    } 
+    else if (card === "Land Tax") { // New Event
+        players.forEach(p => {
+            let tax = Object.values(tileData).filter(tile => tile.flagOwner === p).length;
+            p.coins = Math.max(0, p.coins - tax);
+        });
+        log("Land Tax! Each player loses 1 coin per flagged tile they own.");
+    } 
+    else if (card === "Flag Reduction") { // New Event
+        players.forEach(p => {
+            let ownedFlags = Object.values(tileData).filter(tile => tile.flagOwner === p).length;
+            if (ownedFlags > 0) {
+                let tileToUnflag = Object.keys(tileData).find(index => tileData[index].flagOwner === p);
+                if (tileToUnflag !== undefined) {
+                    tileData[tileToUnflag].flagOwner = null;
+                    log(`${p.name} lost 1 flagged tile.`);
+                }
+            } else {
+                p.coins = Math.max(0, p.coins - 2);
+                log(`${p.name} had no flagged tiles and lost 2 coins instead.`);
+            }
+        });
+        log("Flag Reduction! All players lose 1 flagged tile (or 2 coins if they have none).");
+    } 
+    else if (card === "Reverse") {
+    gameDirection *= -1; // Flip game direction
+    log(`Game direction has reversed! Players now move ${gameDirection === 1 ? "forward" : "backward"}.`);
+}
+
+}
+
+     
+
+/******************************
+ * 🔹 GAME FLOW MANAGEMENT
+ * - Start game function.
+ * - Round progression.
+ * - Game over conditions.
+ ******************************/
+
+async function myTurn(player) {
+    if (player.name === "You") {
+        if (player.actionCards.length === 0) {
+            log("You have no action cards. Your turn is automatically skipped.");
+            return; // Skip turn automatically
+        }
+
+        log(`It's your turn! You have the following action cards: ${player.actionCards.join(", ")}`);
+        log("Click 'Play Action Card' or 'Skip Turn' to continue.");
+        
+        document.getElementById("actionBtn").disabled = false;
+        document.getElementById("skipBtn").disabled = false;
+
+        // Create a Promise that resolves when either button is clicked
+        await new Promise(resolve => {
+            // Action button
+            document.getElementById("actionBtn").addEventListener("click", () => {
+                playActionCard();
+                resolveTurn();
+            }, { once: true });
+
+            // Skip button
+            document.getElementById("skipBtn").addEventListener("click", () => {
+                log("You skipped your turn.");
+                resolveTurn();
+            }, { once: true });
+
+            // Function to disable buttons and resolve the promise
+            function resolveTurn() {
+                document.getElementById("actionBtn").disabled = true;
+                document.getElementById("skipBtn").disabled = true;
+                resolve(); // Game resumes
+            }
+        });
+
+        log("Your turn is over. The game will continue.");
+    }
+}
+
+async function movePlayer(player) {
+    if (player.blocked) {
+        log(`${player.name} was blocked and cannot move this turn.`);
+        player.blocked = false;
+        return;
+    }
+
+    if (player.name !== "You" && player.actionCards.length > 0) {
+        cpuPlayActionCard(player);
+    }
+
+    let roll = rollDie();
+    log(`${player.name} rolled a ${roll}. Coins: ${player.coins}, Flags: ${player.flags}`);
+    player.position = (player.position + roll * gameDirection + tiles.length) % tiles.length;
+
+
+    let tileEffect = tileData[player.position];
+
+    // If the tile is flagged, force the player to pay the owner
+    if (tileEffect.flagOwner !== null && tileEffect.flagOwner !== player) {
+    stats.flagsLanded++;
+    let owner = tileEffect.flagOwner;
+    let penalty = tileEffect.flagPrice || 2; // Use stored price, default to 2 if missing
+    
+    player.coins = Math.max(0, player.coins - penalty);
+    owner.coins += penalty;
+    
+    log(`${player.name} landed on a flagged tile and paid ${penalty} coins to ${owner.name}.`);
+
+    return;
+}
+
+    // **CPU automatically flags with a 50% chance**
+    else if (player.name !== "You" && canFlagTile(player, player.position) && Math.random() < 0.5) {
+        flagTile(player, player.position);
+    }
+    // Ensure board updates before prompting to flag
+updateBoard();
+updatePlayerStats();
+
+await new Promise(resolve => {
+    setTimeout(() => {
+        if (player.name === "You" && canFlagTile(player, player.position)) {
+            let wantsToFlag = confirm(`Do you want to flag this tile for ${round} coin?`);
+            if (wantsToFlag) {
+                flagTile(player, player.position);
+            }
+        }
+        resolve(); // Only move to the next turn after the player responds
+    }, 500); // Small delay to allow board to update before prompting
+});
+
+
+
+// Track how many times each tile type is landed on
+if (tileEffect.type === "blue") {
+    player.coins += 1;
+    stats.blueTile++;
+    log(`${player.name} landed on a blue tile and gained 1 coin. (Total: ${stats.blueTile})`);
+} else if (tileEffect.type === "red") {
+    player.coins -= 1;
+    stats.redTile++;
+    log(`${player.name} landed on a red tile and lost 1 coin. (Total: ${stats.redTile})`);
+} else if (tileEffect.type === "yellow") {
+    let card = drawCard("action");
+    player.actionCards.push(card);
+    stats.yellowTile++;
+    log(`${player.name} drew an action card on a yellow tile. (Total: ${stats.yellowTile})`);
+} else if (tileEffect.type === "green") {
+    let card = drawCard("event");
+    stats.greenTile++;
+    log(`${player.name} drew an event card on a green tile. (Total: ${stats.greenTile})`);
+    handleEventCard(players, player, card);
+}
+
+
+    updateBoard();
+    updatePlayerStats();
+
+    if (player.name === "You") {
+        await myTurn(player);
+    } else {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+}
+
+
+function resetRound() {
+    players.forEach(player => {
+        player.flags = 5; // Restore flags
+        player.actionCards = []; // Clear action cards
+        player.position = 0; // Reset position to start
+    });
+
+    // ✅ Restore ownership of stolen flagged tiles
+    tileData.forEach(tile => {
+        if (tile.originalOwner) {
+            tile.flagOwner = tile.originalOwner; // Return tile to its original owner
+            tile.originalOwner = null;
+        } else {
+            tile.flagOwner = null; // ✅ Remove flags from tiles that were placed this round
+        }
+    });
+
+    gameDirection = 1; // Reset movement direction to forward
+    updateBoard();
+    updatePlayerStats();
+    log("All players and flags have been reset for the next round.");
+}
+
+
+function clearLog() {
+    document.getElementById('log').textContent = "";
+}
+
+function waitForNextRound() {
+    return new Promise(resolve => {
+        const nextRoundBtn = document.getElementById("nextRoundBtn");
+        nextRoundBtn.style.display = "block"; // Show the button
+        nextRoundBtn.onclick = () => {
+            nextRoundBtn.style.display = "none"; // Hide button after clicking
+            resolve(); // Resume the game
+        };
+    });
+}
+
+
+async function startGame() {
+    document.getElementById("startBtn").disabled = true;
+    document.getElementById("nextRoundBtn").style.display = "none"; // Hide "Start Next Round" button at game start
+    resetRound();
+    clearLog();
+    players.forEach(player => {
+        player.coins = 10;
+    });
+
+    stats.blueTile = 0;
+    stats.redTile = 0;
+    stats.yellowTile = 0;
+    stats.greenTile = 0;
+    stats.flagTile = 0;
+    stats.flagsLanded = 0;
+
+    log("Game started!");
+    updateBoard();
+    updatePlayerStats();
+
+    let roundTotal = parseInt(prompt("How many rounds total?"));
+    let turnTotal = parseInt(prompt("How many turns per round?"));
+
+    for (round = 1; round <= roundTotal; round++) {
+        log(`=== Round ${round} Start ===`);
+
+        for (turn = 1; turn <= turnTotal; turn++) {
+            log(`--- Turn ${turn} ---`);
+            for (let player of players) {
+                await movePlayer(player);
+            }
+        }
+
+        log(`=== Round ${round} Over! ===`);
+
+        if (round < roundTotal) { 
+            log(`Press "Start Next Round" to continue.`);
+            await waitForNextRound(); // ⏸ Pause here until player clicks "Start Next Round"
+            resetRound(); // Reset values for the next round
+        }
+    }
+
+    log("Game over!");
+    document.getElementById("startBtn").disabled = false;
+    document.getElementById("nextRoundBtn").style.display = "none"; // Hide button at game end
+}
+
+
+
+
+document.getElementById("startBtn").addEventListener("click", startGame);
+</script>
+
+</body>
+</html>
